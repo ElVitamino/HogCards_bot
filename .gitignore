@@ -1,0 +1,28 @@
+# Файлы с данными
+case_data.json
+*.db
+*.sqlite
+
+# Токены и секреты
+*.env
+config.py
+secrets.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Логи
+*.log
