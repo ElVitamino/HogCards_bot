@@ -13,7 +13,10 @@ from functools import wraps
 import telebot.apihelper
 import sys
 from typing import Dict, List, Any, Optional, Union
+from dotenv import load_dotenv
 
+
+load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
