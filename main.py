@@ -5,7 +5,7 @@ import random
 import tempfile
 import threading
 import telebot
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import requests
 import shutil
@@ -30,9 +30,17 @@ def is_member(user_id: int, chat_id: int) -> bool:
     try:
         member = bot.get_chat_member(chat_id, user_id)
         return member.status in ("member", "administrator", "creator")
-    except Exception as e:
-        print(f"Ошибка проверки членства в {chat_id}:", e)
+    except telebot.apihelper.ApiTelegramException as e:
+        if e.error_code == 400:
+            # Пользователь не найден в чате
+            return False
+        print(f"Ошибка проверки членства в {chat_id}: {e}")
         return False
+    except Exception as e:
+        print(f"Ошибка проверки членства в {chat_id}: {e}")
+        # При ошибке соединения лучше пропустить пользователя
+        return True
+
 
 def require_podval(func):
     def wrapper(message, *args, **kwargs):
@@ -121,7 +129,144 @@ def _thread_id_of(message):
 
 COOLDOWN_SECONDS = 4 * 60 * 60
 DATA_FILE = "case_data.json"
+RIDDLE_DATA_FILE = "riddle_data.json"
 
+DAILY_RIDDLES = [
+    {
+        "question": "Какая птица взрывается?",
+        "options": ["Матильда", "Бомб", "Сильвер"],
+        "correct": "Бомб",
+        "message": "💣 Бомб взрывается! Карта за знание птиц!"
+    },
+    {
+        "question": "Какого цвета главный враг птиц?",
+        "options": ["Красный", "Синий", "Зелёный"],
+        "correct": "Зелёный",
+        "message": "🐷 Зелёная свинья — классика! Карта за знание врага!"
+    },
+    {
+        "question": "Какая птица ускоряется?",
+        "options": ["Хэл", "Теренс", "Чак"],
+        "correct": "Чак",
+        "message": "⚡ Чак ускоряется! Карта за скорость!"
+    },
+    {
+        "question": "Кто является лидером стаи?",
+        "options": ["Бомб", "Чак", "Ред"],
+        "correct": "Ред",
+        "message": "🔴 Ред — лидер стаи! Карта за знание командира!"
+    },
+    {
+        "question": "Какая птица откладывает яйца-бомбы?",
+        "options": ["Матильда", "Стелла", "Сильвер"],
+        "correct": "Матильда",
+        "message": "🥚 Матильда с яйцами-бомбами! Карта за материнство!"
+    },
+    {
+        "question": "Как зовут огромную красную птицу?",
+        "options": ["Теренс", "Хэл", "Бомб"],
+        "correct": "Теренс",
+        "message": "💪 Теренс — огромная красная птица! Карта за мощь!"
+    },
+    {
+        "question": "Что воруют свиньи у птиц?",
+        "options": ["Гнездо", "Яйца", "Еду"],
+        "correct": "Яйца",
+        "message": "🥚 Яйца украли! Карта за спасение гнезда!"
+    },
+    {
+        "question": "Какая птица возвращается бумерангом?",
+        "options": ["Хэл", "Блюз", "Стелла"],
+        "correct": "Хэл",
+        "message": "🪃 Хэл возвращается бумерангом! Карта за знание техники!"
+    },
+    {
+        "question": "Из чего стреляют птицами?",
+        "options": ["Из лука", "Из рогатки", "Из пушки"],
+        "correct": "Из рогатки",
+        "message": "🏹 Из рогатки! Карта за знание оружия!"
+    },
+    {
+        "question": "Кто главный босс свиней?",
+        "options": ["Король Свин", "Кабаненко", "Зелёный свин"],
+        "correct": "Король Свин",
+        "message": "👑 Король Свин — главный босс! Карта за знание иерархии!"
+    },
+    {
+        "question": "Сколько всего птиц в классической Angry Birds?",
+        "options": ["3", "5", "7"],
+        "correct": "5",
+        "message": "5️⃣ Пять классических птиц! Карта за внимательность!"
+    },
+    {
+        "question": "Какая птица разделяется на три?",
+        "options": ["Блюз", "Хэл", "Стелла"],
+        "correct": "Блюз",
+        "message": "💙 Блюз разделяется на три! Карта за знание способностей!"
+    },
+    {
+        "question": "Какая птица пускает пузыри?",
+        "options": ["Стелла", "Матильда", "Сильвер"],
+        "correct": "Стелла",
+        "message": "🫧 Стелла пускает пузыри! Карта за знание всех птиц!"
+    },
+    {
+        "question": "Какая птица делает мёртвую петлю?",
+        "options": ["Сильвер", "Блюз", "Бомб"],
+        "correct": "Сильвер",
+        "message": "🔄 Сильвер делает мёртвую петлю! Карта за знание пилотажа!"
+    },
+    {
+        "question": "Любимая еда Кабаненко?",
+        "options": ["Пончики", "Яблоки", "Пицца"],
+        "correct": "Пончики",
+        "message": "🍩 Пончики — любимая еда Кабаненко! Карта за знание вкусов!"
+    },
+    {
+        "question": "Где живёт Кабаненко?",
+        "options": ["В подвале", "В лесу", "На ферме"],
+        "correct": "В подвале",
+        "message": "🏚️ В подвале! Карта за знание места обитания!"
+    },
+    {
+        "question": "Как зовут чёрную птицу?",
+        "options": ["Бомб", "Теренс", "Хэл"],
+        "correct": "Бомб",
+        "message": "🖤 Бомб — чёрная птица! Карта за знание цветов!"
+    },
+    {
+        "question": "Какая птица самая маленькая?",
+        "options": ["Блюз", "Чак", "Ред"],
+        "correct": "Блюз",
+        "message": "💙 Блюз — самая маленькая птица! Карта за внимательность!"
+    },
+]
+# Редкости от Легендарной до самой редкой эволюционной (без эксклюзивок)
+DAILY_RIDDLE_RARITIES = [
+    "Обычная",
+    "Редкая",
+    "Сверхредкая",
+    "Эпическая",
+    "Мифическая",
+    "Легендарная",
+    "Царская",
+    "Великоимператорская"
+]
+
+# Веса по твоим процентам
+DAILY_RIDDLE_WEIGHTS = {
+    "Обычная": 5,
+    "Редкая": 7,
+    "Сверхредкая": 10,
+    "Эпическая": 15,
+    "Мифическая": 17,
+    "Легендарная": 20,
+    "Царская": 15,
+    "Великоимператорская": 5
+}
+
+# Храним текущие загадки для каждого пользователя
+active_riddles = {}
 
 RARITY_WEIGHTS = {
     "Эксклюзивная I степени": 0,
@@ -1631,7 +1776,9 @@ def help_cmd(message):
         "👤 <b>/infoprofilenko</b> | <b>/infoprofile</b>\n"
         "Информация про профиль, его настройку и команды\n\n"
         "📩 <b>/infogiftenko</b> | <b>/infogift</b>\n"
-        "Информация о том, как дарить карты"
+        "Информация о том, как дарить карты\n\n"
+        "🎯 <b>/riddle</b> | <b>/riddleko</b> | <b>/загадка</b>\n"
+        "Ежедневная загадка про Angry Birds с наградой!"
     )
 
     bot.send_message(
@@ -1848,125 +1995,22 @@ def profile_info_cmd(message):
 
 
 @bot.message_handler(commands=["china", "si"])
-@require_topic
 @require_podval
-def event_case_cmd(message):
-    handle_event_case(message)
-
-
-def handle_event_case(message):
-    user = message.from_user
-    user_id = str(user.id)
+@require_topic
+def china_stub(message):
     thread_id = getattr(message, "message_thread_id", None)
-
-    data = load_data()
-    u = get_or_init_user(data, user)
-
-    last_case = data.get("last_event_case", {}).get(user_id, 0)
-    now = int(time.time())
-    COOLDOWN_SECONDS_LOCAL = 14400  # 4 часа
-
-    # отображение имени
-    if user.username:
-        user_display = f"@{user.username}"
-    else:
-        user_display = f'<a href="tg://user?id={user.id}">{user.first_name}</a>'
-
-    # КУЛДАУН
-    if now - last_case < COOLDOWN_SECONDS_LOCAL:
-        remaining = COOLDOWN_SECONDS_LOCAL - (now - last_case)
-        h, rem = divmod(remaining, 3600)
-        m, s = divmod(rem, 60)
-
-        cooldown_text = (
-            f"{user_display}\n"
-            f"🇪🇺🔧 稍等片刻，我们正在窃取西方的技术。\n"
-            f"⏳ Осталось: {h} ч {m} мин {s} сек."
-        )
-
-        bot.send_message(
-            message.chat.id,
-            cooldown_text,
-            message_thread_id=thread_id,
-            parse_mode="HTML"
-        )
-        return
-
-    archive_ids = set(ARCHIVE_CARDS)
-    pool = [c for c in EVENT_CARDS if c["id"] not in archive_ids]
-
-    if not pool:
-        bot.send_message(
-            chat_id=message.chat.id,
-            text="【⚠️】• Новые ивенты скоро будут...",
-            message_thread_id=thread_id
-        )
-        return
-
-    owned = set(u.get("cards", {}).keys())
-
-    event_streak = u.get("event_repeat_streak", 0)
-
-    if event_streak >= 2:
-        available = [c for c in pool if c["id"] not in owned]
-        if available:
-            card = random.choice(available)
-            added_score, is_new = update_user_stats_with_card(data, user, card)
-            u["event_repeat_streak"] = 0
-        else:
-            card = random.choice(pool)
-            added_score, is_new = update_user_stats_with_card(data, user, card)
-            u["event_repeat_streak"] = 0
-    else:
-        card = random.choice(pool)
-        added_score, is_new = update_user_stats_with_card(data, user, card)
-
-        if is_new:
-            u["event_repeat_streak"] = 0
-        else:
-            u["event_repeat_streak"] = event_streak + 1
-
-    # === ТЕКСТЫ ===
-    if is_new:
-        caption = (
-            user_display +
-            f'<blockquote>🇨🇳🀄️ 偉大的領袖給了你一張新牌 🎴🐼 "{card["name"]}"\n'
-            f'🎴 Редкость: Китайская\n'
-            f'🪙 Социал-кредит: +{added_score}</blockquote>'
-        )
-    else:
-        caption = (
-            user_display +
-            f'<blockquote>认清台湾！你不配拥有新地图！🇹🇼 "{card["name"]}"</blockquote>'
-        )
-
-    # === СОХРАНЕНИЕ КД ===
-    data.setdefault("last_event_case", {})[user_id] = now
-    save_data_atomic(data)
-
-    # === ОТПРАВКА КАРТИНКИ ===
-    url = card.get("image_url")
-    if url:
-        try:
-            bot.send_photo(
-                chat_id=message.chat.id,
-                photo=resolve_direct_image_url(url),
-                caption=caption,
-                message_thread_id=thread_id,
-                parse_mode="HTML"
-            )
-            return
-        except Exception as e:
-            print("Ошибка send_photo (eventcase):", e)
-
+    responses = [
+        "🇨🇳 中国已经关闭了这个功能... (Китай закрыл эту функцию)",
+        "🔧 我们正在修理... (Мы чиним...)",
+        "🐼 Панда съела все ивентовые карты. Извините.",
+        "🏭 Завод по производству ивентов закрыт на модернизацию.",
+        "📉 Ивентовые карты закончились. Китай больше не поставляет.",
+    ]
     bot.send_message(
-        chat_id=message.chat.id,
-        text=caption + (f"\n(Ссылка: {url})" if url else ""),
-        disable_web_page_preview=False,
-        parse_mode="HTML",
+        message.chat.id,
+        random.choice(responses),
         message_thread_id=thread_id
     )
-
 
 
 
@@ -3736,6 +3780,269 @@ def unset_topic_cmd(message):
             parse_mode="HTML"
         )
 
+def load_riddle_data():
+    """Загружает данные загадок из отдельного JSON-файла"""
+    if not os.path.exists(RIDDLE_DATA_FILE):
+        with open(RIDDLE_DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump({}, f, ensure_ascii=False)
+        return {}
+    try:
+        with open(RIDDLE_DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_riddle_data(data):
+    """Сохраняет данные загадок в отдельный JSON-файл"""
+    with open(RIDDLE_DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def get_random_riddle():
+    """Выбирает случайную загадку"""
+    return random.choice(DAILY_RIDDLES)
+
+
+@bot.message_handler(commands=["riddle", "riddleko", "загадка"])
+@require_podval
+@require_topic
+def riddle_cmd(message):
+    """Показывает ежедневную загадку"""
+    user_id = str(message.from_user.id)
+    thread_id = getattr(message, "message_thread_id", None)
+    
+    # Загружаем данные загадок
+    riddle_data = load_riddle_data()
+    
+    # Проверяем, отвечал ли уже сегодня
+    today = datetime.now().strftime("%Y%m%d")
+    last_riddle = riddle_data.get(user_id, "")
+    
+    if last_riddle == today:
+        # Вычисляем время до полуночи
+        now = datetime.now()
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if now >= midnight:
+            midnight = midnight + timedelta(days=1)
+        time_left = midnight - now
+        hours = time_left.seconds // 3600
+        minutes = (time_left.seconds % 3600) // 60
+        seconds = time_left.seconds % 60
+        
+        bot.send_message(
+            message.chat.id,
+            f"✅ Ты уже ответил на загадку сегодня!\n\n⏰ Следующая загадка через: {hours} ч {minutes} мин {seconds} сек",
+            message_thread_id=thread_id
+        )
+        return
+    
+    # Выбираем случайную загадку для этого игрока
+    riddle = get_random_riddle()
+    
+    # Перемешиваем варианты ответов
+    options = riddle["options"].copy()
+    random.shuffle(options)
+    
+    # Сохраняем активную загадку для пользователя
+    active_riddles[user_id] = {
+        "correct": riddle["correct"],
+        "message": riddle["message"],
+        "question": riddle["question"],
+        "options": options
+    }
+    
+    # Формируем текст
+    options_text = "\n".join([f"   {i+1}) {opt}" for i, opt in enumerate(options)])
+    
+    question_text = (
+        f"❓ <b>Ежедневная загадка</b>\n\n"
+        f"{riddle['question']}\n\n"
+        f"<b>Варианты ответов:</b>\n"
+        f"{options_text}\n\n"
+        f"✏️ Ответь командой: <code>/answer [твой ответ]</code>"
+    )
+    
+    bot.send_message(
+        message.chat.id,
+        question_text,
+        parse_mode="HTML",
+        message_thread_id=thread_id
+    )
+
+
+@bot.message_handler(commands=["answer", "ответ", "otvet"])
+@require_podval
+@require_topic
+def answer_riddle_cmd(message):
+    """Обработчик ответа на загадку"""
+    user_id = str(message.from_user.id)
+    thread_id = getattr(message, "message_thread_id", None)
+    
+    # Загружаем данные
+    riddle_data = load_riddle_data()
+    data = load_data()
+    
+    # Проверяем, есть ли активная загадка
+    if user_id not in active_riddles:
+        bot.send_message(
+            message.chat.id,
+            "❓ Сначала получи загадку командой /riddle",
+            message_thread_id=thread_id
+        )
+        return
+    
+    # Проверяем, не отвечал ли уже сегодня
+    today = datetime.now().strftime("%Y%m%d")
+    last_riddle = riddle_data.get(user_id, "")
+    
+    if last_riddle == today:
+        # Вычисляем время до полуночи
+        now = datetime.now()
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        if now >= midnight:
+            midnight = midnight + timedelta(days=1)
+        time_left = midnight - now
+        hours = time_left.seconds // 3600
+        minutes = (time_left.seconds % 3600) // 60
+        seconds = time_left.seconds % 60
+        
+        bot.send_message(
+            message.chat.id,
+            f"✅ Ты уже ответил на загадку сегодня! Следующая через {hours} ч {minutes} мин {seconds} сек",
+            message_thread_id=thread_id
+        )
+        return
+    
+    # Получаем ответ пользователя
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        bot.send_message(
+            message.chat.id,
+            "✏️ Укажи ответ после команды!\nПример: <code>/answer Бомб</code>",
+            parse_mode="HTML",
+            message_thread_id=thread_id
+        )
+        return
+    
+    user_answer = args[1].strip().lower()
+    riddle_info = active_riddles[user_id]
+    correct_answer = riddle_info["correct"].lower()
+    
+    # Вычисляем время до полуночи
+    now = datetime.now()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if now >= midnight:
+        midnight = midnight + timedelta(days=1)
+    time_left = midnight - now
+    hours = time_left.seconds // 3600
+    minutes = (time_left.seconds % 3600) // 60
+    seconds = time_left.seconds % 60
+    
+    # Проверяем ответ
+    if user_answer == correct_answer:
+        # Правильный ответ - сохраняем дату
+        riddle_data[user_id] = today
+        save_riddle_data(riddle_data)
+        
+        # Выбираем награду
+        rarities = list(DAILY_RIDDLE_WEIGHTS.keys())
+        weights = [DAILY_RIDDLE_WEIGHTS[r] for r in rarities]
+        chosen_rarity = random.choices(rarities, weights=weights, k=1)[0]
+        
+        # Ищем карту
+        pool = [
+            c for c in CARDS
+            if c["rarity"] == chosen_rarity
+            and c["id"] not in ARCHIVE_CARDS
+            and c["id"] not in {ec["id"] for ec in EVENT_CARDS}
+        ]
+        
+        u = get_or_init_user(data, message.from_user)
+        
+        if pool:
+            card = random.choice(pool)
+            rarity = card["rarity"]
+            base_score = SCORE_WEIGHTS.get(rarity, 0)
+            
+            added_score, is_new = update_user_stats_with_card(data, message.from_user, card)
+            evo_result = process_evolution_if_ready(data, message.from_user, card)
+            
+            if evo_result:
+                total_score = base_score * 2
+                win_text = (
+                    f"✅ Правильно! {riddle_info['message']}\n\n"
+                    f"🎴 Карта: {card['name']} ({rarity})\n"
+                    f"🪬 Эволюция! x2 ауры: +{total_score} ауры!\n\n"
+                    f"⏰ Следующая загадка через: {hours} ч {minutes} мин {seconds} сек"
+                )
+            elif is_new:
+                win_text = (
+                    f"✅ Правильно! {riddle_info['message']}\n\n"
+                    f"🎴 Карта: {card['name']} ({rarity})\n"
+                    f"✨ +{added_score} ауры!\n\n"
+                    f"⏰ Следующая загадка через: {hours} ч {minutes} мин {seconds} сек"
+                )
+            else:
+                win_text = (
+                    f"✅ Правильно! {riddle_info['message']}\n\n"
+                    f"🎴 Карта: {card['name']} ({rarity})\n"
+                    f"📊 Уже была в коллекции\n\n"
+                    f"⏰ Следующая загадка через: {hours} ч {minutes} мин {seconds} сек"
+                )
+            
+            save_data_atomic(data)
+            
+            # Отправляем картинку с наградой
+            url = card.get("image_url")
+            if url:
+                try:
+                    bot.send_photo(
+                        chat_id=message.chat.id,
+                        photo=resolve_direct_image_url(url),
+                        caption=win_text,
+                        parse_mode="HTML",
+                        message_thread_id=thread_id
+                    )
+                except Exception:
+                    bot.send_message(
+                        message.chat.id,
+                        win_text,
+                        parse_mode="HTML",
+                        message_thread_id=thread_id
+                    )
+            else:
+                bot.send_message(
+                    message.chat.id,
+                    win_text,
+                    parse_mode="HTML",
+                    message_thread_id=thread_id
+                )
+        else:
+            win_text = f"✅ Правильно! {riddle_info['message']}\n\n⚠️ Но карт такой редкости не осталось!\n\n⏰ Следующая загадка через: {hours} ч {minutes} мин {seconds} сек"
+            bot.send_message(
+                message.chat.id,
+                win_text,
+                parse_mode="HTML",
+                message_thread_id=thread_id
+            )
+        
+    else:
+        # Неправильный ответ
+        riddle_data[user_id] = today
+        save_riddle_data(riddle_data)
+        
+        win_text = f"❌ Неправильно! Правильный ответ: <b>{riddle_info['correct']}</b>\n\n⏰ Следующая загадка через: {hours} ч {minutes} мин {seconds} сек"
+        
+        bot.send_message(
+            message.chat.id,
+            win_text,
+            parse_mode="HTML",
+            message_thread_id=thread_id
+        )
+    
+    # Удаляем активную загадку
+    del active_riddles[user_id]
 
 
 if __name__ == "__main__":
